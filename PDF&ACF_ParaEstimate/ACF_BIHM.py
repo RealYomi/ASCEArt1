@@ -32,7 +32,6 @@ for i, (var_val, len_scale_val, alpha_val) in enumerate(zip(vars_array, len_scal
 def rational_variogram(h, var, len_scale, alpha):
     """Compute the rational variogram model."""
     h_scaled = h / len_scale
-    # return var * (h_scaled**2 / (1.0 + h_scaled**2/alpha))
     return var * (1 - (1 + (1 / alpha) * ((h_scaled) ** 2)) ** (-alpha))
 
 with pm.Model() as hierarchical_model:
@@ -77,8 +76,8 @@ with pm.Model() as hierarchical_model:
                            observed=alphas_array)
     
     # Sample from the posterior
-    # idata = pm.sample(1000, tune=500, cores=2, target_accept=0.95, random_seed=42)
-    idata = pm.sample(1000, tune=500, cores=2, target_accept=0.95)
+    idata = pm.sample(1000, tune=500, cores=2, target_accept=0.95, random_seed=42)
+
     
     # Print a summary of the posterior distributions for the hyperparameters
     summary = az.summary(idata, hdi_prob=0.95)
@@ -114,11 +113,11 @@ print(f"Length scale: {rep_len_scale:.5f}")
 print(f"Alpha: {rep_alpha:.5f}")
 print(f"Alpha component used: {more_likely_component}")
 
+########## Plotting the models
+x = np.linspace(0, 42, 100)
+
 # Define the optimized model using the representative parameters
 proposed_model = gs.Rational(dim=2, var=rep_var, len_scale=rep_len_scale, nugget=False, alpha=rep_alpha)
-
-# Plotting the models
-x = np.linspace(0, 42, 100)
 
 plt.figure(figsize=(12, 8))
 
@@ -136,6 +135,115 @@ plt.xlabel('Lag distance ($\\Delta s$-cm)', fontsize=12)
 plt.ylabel(r'Gamma $\gamma(h)$', fontsize=12)
 plt.yticks(np.arange(0, 3.12, 0.25), fontsize=12)
 plt.xticks(np.arange(0, 41, 5), fontsize=12)
+plt.grid(True)
+
+plt.show()
+
+
+########## Plot posterior distributions for the hyperparameters
+az.plot_posterior(idata, var_names=['mu_var', 'sigma_var', 'mu_len_scale', 'sigma_len_scale', 'mu_alpha_small', 'sigma_alpha_small', 'mu_alpha_large', 'sigma_alpha_large', 'w'])
+plt.tight_layout()
+plt.show()
+
+
+########## Trace Plots to check MCMC convergence
+az.plot_trace(idata, var_names=['mu_var', 'sigma_var', 'mu_len_scale', 'sigma_len_scale', 'mu_alpha_small', 'sigma_alpha_small', 'mu_alpha_large', 'sigma_alpha_large', 'w'])
+plt.tight_layout()
+plt.show()
+
+
+########## Credible Interval Plot showing uncertainty in the representative variogram:
+# Generate samples from the posterior
+n_samples = 100
+# Pre-allocate an array to store the vario samples
+vario_samples = np.zeros((n_samples, len(x)))
+# Correctly sample from posterior
+sample_indices = np.random.choice(idata.posterior.chain.size * idata.posterior.draw.size, 
+                                 size=n_samples, replace=False)
+chain_indices = sample_indices // idata.posterior.draw.size
+draw_indices = sample_indices % idata.posterior.draw.size
+
+plt.figure(figsize=(12, 8))
+# Plot original models
+for i, model in enumerate(models):
+    plt.plot(x, model.variogram(x), label=f'A{i+1}')
+
+# Plot posterior samples to show uncertainty
+for i in range(n_samples):
+    var_sample = idata.posterior['mu_var'].values[chain_indices[i], draw_indices[i]]
+    len_scale_sample = idata.posterior['mu_len_scale'].values[chain_indices[i], draw_indices[i]]
+    # Sample alpha and clip its value to be at least 0.5
+    alpha_sample = idata.posterior['mu_alpha_small'].values[chain_indices[i], draw_indices[i]]
+    alpha_sample = np.clip(alpha_sample, 0.5, None)  # Enforce lower bound of 0.5
+    vario_samples[i, :] = rational_variogram(x, var_sample, len_scale_sample, alpha_sample)
+
+# Plot the proposed model
+proposed_label = f'Proposed model\nvar={rep_var:.2f}\nlen_scale={rep_len_scale:.2f}\nalpha={rep_alpha:.2f}'
+plt.plot(x, proposed_model.variogram(x), 'k--', linewidth=3, label=proposed_label)
+
+# Optionally, plot the individual posterior samples (with low alpha for transparency)
+for i in range(n_samples):
+    plt.plot(x, vario_samples[i, :], 'k-', alpha=0.05)
+
+# Customize the plot
+plt.xlabel('Dynamic modulus (GPa)', fontsize=18)
+plt.ylabel('Density', fontsize=18)
+plt.xticks(fontsize=18)
+plt.yticks(fontsize=18)
+plt.title('Original Lognormal PDFs & Proposed model with Posterior Uncertainty')
+plt.legend(fontsize=12)
+plt.grid(True)
+
+plt.show()
+
+
+###### OR ######
+# Generate samples from the posterior
+n_samples = 100
+# Pre-allocate an array to store the vario samples
+vario_samples = np.zeros((n_samples, len(x)))
+# Correctly sample from posterior
+sample_indices = np.random.choice(idata.posterior.chain.size * idata.posterior.draw.size, 
+                                 size=n_samples, replace=False)
+chain_indices = sample_indices // idata.posterior.draw.size
+draw_indices = sample_indices % idata.posterior.draw.size
+
+plt.figure(figsize=(12, 8))
+# Plot original models
+for i, model in enumerate(models):
+    plt.plot(x, model.variogram(x), label=f'A{i+1}')
+
+# Plot posterior samples to show uncertainty
+for i in range(n_samples):
+    var_sample = idata.posterior['mu_var'].values[chain_indices[i], draw_indices[i]]
+    len_scale_sample = idata.posterior['mu_len_scale'].values[chain_indices[i], draw_indices[i]]
+    # Sample alpha and clip its value to be at least 0.5
+    alpha_sample = idata.posterior['mu_alpha_small'].values[chain_indices[i], draw_indices[i]]
+    alpha_sample = np.clip(alpha_sample, 0.5, None)  # Enforce lower bound of 0.5
+    vario_samples[i, :] = rational_variogram(x, var_sample, len_scale_sample, alpha_sample)
+    
+# Calculate the 95% credible interval at each x value
+lower_ci = np.percentile(vario_samples, 2.5, axis=0)
+upper_ci = np.percentile(vario_samples, 97.5, axis=0)
+mean_vario = np.mean(vario_samples, axis=0)
+
+# Optionally, plot the individual posterior samples (with low alpha for transparency)
+for i in range(n_samples):
+    plt.plot(x, vario_samples[i, :], 'k-', alpha=0.05)
+
+# Plot the confidence interval as a shaded region
+plt.fill_between(x, lower_ci, upper_ci, color='red', alpha=0.2, label='95% credible interval')
+
+# Plot the representative (mean) Variogram
+plt.plot(x, mean_vario, 'k--', linewidth=3, 
+         label=f'Proposed model\nMean: {np.mean(mean_vario):.4f}')
+
+plt.xlabel('Dynamic modulus (GPa)', fontsize=18)
+plt.ylabel('Density', fontsize=18)
+plt.xticks(fontsize=18)
+plt.yticks(fontsize=18)
+plt.title('Original Lognormal PDFs & Proposed model with Posterior Uncertainty')
+plt.legend(fontsize=12)
 plt.grid(True)
 
 plt.show()
