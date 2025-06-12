@@ -1,7 +1,7 @@
 
 # %%
 """
-This Code can be used to estimate both structured and unstructured Variograms
+This code estimate both structured and unstructured Variograms
 from Experimental data.
 Enter the lag steps and tolerance.
 Enter the number of directions and tolerance.
